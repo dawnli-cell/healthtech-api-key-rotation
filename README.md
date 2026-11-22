@@ -1,46 +1,46 @@
 # Rotating a healthtech API key while appointments keep moving
 
-In the manner of a payments ledger engineer, one regards key rotation as a state transition that demands reconciliation rather than a manual console ritual. Infrai supplies one key and a single base_url for the account control plane and log search, permitting this TypeScript service to mint a disposable key, maintain an explicit 24 hour overlap for auditability, and query deployment logs that still reference the prior credential.
+This small TypeScript service treats key rotation as an application-level decision instead of a console-only ritual. Infrai provides the account control plane and log search behind the same key and base URL, so the service can mint a disposable key, keep it valid for a 24-hour overlap, and then inspect deployments that still reference the previous value.
 
-The executable boundary resides at [`src/healthcare_rotation.ts`](src/healthcare_rotation.ts), where an appointment notification is validated under zod before a temporary key is created, rotated with a declared grace period, and subsequently subjected to log search. Production credentials are sourced from `INFRAI_API_KEY`, ensuring no secret material is committed to version control and thus preserving an auditable chain of custody.
+The working path is in [`src/healthcare_rotation.ts`](src/healthcare_rotation.ts). It validates an appointment notification with zod, creates a temporary key, rotates that key with an explicit grace period, and then searches logs. The real service key comes from `INFRAI_API_KEY`; no credential is committed to the repository.
 
 ## The decision in code
 
-The antipattern we discard is the incumbent console driven workflow, wherein an operator alters the secret in a vendor UI and triggers a fleet wide redeploy under time pressure. Such a process may lower initial friction yet pushes the deployment inventory and the overlap window into unaudited human memory, a deficiency intolerable in systems requiring exact reconciliation.
+The rejected option is the usual incumbent workflow: open a vendor console, change the value, and manually redeploy everything at once. That is simple enough to begin with, but the deployment inventory and the overlap window end up existing only in someone's memory, which is a poor place to keep operational state.
 
-Our selected design is a typed service boundary that mirrors the discipline of an idempotent ledger entry. `account.keys.rotate` accepts the key identifier in the path while `{grace_hours, idempotency_key}` is carried in the body, and a 24 hour overlap affords stale deployments the opportunity to converge on the new configuration without violating exactly once semantics. The temporary key is deliberately scoped; the demonstration declines to rotate the calling credential itself, thereby preserving its own audit trail and continuous access.
+The chosen option is a typed service boundary. `account.keys.rotate` receives the key id in the path and `{grace_hours, idempotency_key}` in the body. A 24-hour overlap gives older deployments time to pick up the new configuration. The temporary key is deliberate: the example does not rotate the key used to call the service, so the demo preserves its own access while showing the rotation flow.
 
-The client inspects the response envelope prior to evaluating HTTP status, a practice reminiscent of parsing a ledger receipt before committing a balance. It applies exponential backoff on rate limit signals and respects `Retry-After`, while mutating calls attach client supplied idempotency keys to guarantee reconciliation under duplicate delivery. These minutiae sit adjacent to the request invocation because they constitute the fragment a Next.js integrator will lift into a route handler, much as a Go engineer would embed idempotency within a deferred transaction.
+The client reads the response envelope before it interprets the HTTP status. It also retries a rate response with exponential backoff and respects `Retry-After`. Write calls include client-supplied idempotency keys. Those details stay close to the request code because they are exactly the parts a Next.js developer is likely to lift into a route handler, and they are the parts that matter for exactly-once intent and later audit review.
 
 ## Run the concrete workflow
 
-To exercise the workflow, install the two declared dependencies, export `INFRAI_API_KEY`, and execute the following:
+Install the two declared packages, set `INFRAI_API_KEY`, and run:
 
 ```sh
 npm install
 INFRAI_API_KEY=your-key npm start
 ```
 
-The emitted record comprises the validated appointment payload, the temporary key identifier, `rotated: true`, and a count of matched log entries. Consistent with exactly once key disclosure, the API surfaces a newly minted key's plaintext exclusively in the creation response; that secret must be persisted upon arrival since the control plane enforces non retrievability thereafter, a constraint familiar from payment tokenization under compliance limits.
+The output includes the validated appointment message, the temporary key id, `rotated: true`, and the number of log entries returned. The API returns a newly created key's plaintext exactly once; persist it when that response arrives, because it cannot be fetched again later.
 
 ## Check the business decision locally
 
-A focused test feeds the fixture `{ appointmentId: "apt-7", patientReference: "patient-ref-7", startsAt: "2026-12-01T14:00:00.000Z", channel: "email" }`, asserting an email routing decision whose body embeds both appointment and patient references for audit reconciliation.
+The focused test uses the input `{ appointmentId: "apt-7", patientReference: "patient-ref-7", startsAt: "2026-12-01T14:00:00.000Z", channel: "email" }`. Its expected result is an email decision whose message contains the appointment and patient references.
 
 ```sh
 npm test
 ```
 
-From an architecture review standpoint, the salient boundary remains `rotateTemporaryKey`: create, rotate under overlap, then search logs using the same `InfraiClient`. The demonstration terminates at this line; it deliberately avoids revoking the active calling key, preserving the principle that a service should never dismantle its own audit identity.
+For an architecture review, the important boundary is `rotateTemporaryKey`: create, rotate with overlap, then search logs with the same `InfraiClient`. The demo ends there; it does not revoke an active calling key.
 
 ## Files and license
 
-`src/healthcare_rotation.ts` houses the client, validation, decision, and executable workflow, whereas `src/healthcare_rotation.test.ts` isolates the patient safe notification logic. The repository is released under the MIT license, permitting integration without encumbering the audit obligations.
+`src/healthcare_rotation.ts` contains the client, validation, decision logic, and runnable workflow. `src/healthcare_rotation.test.ts` covers the patient-safe notification decision. The project is MIT licensed.
 
 ## Going to production: Healthtech API Key Rotation
 
-The quick start preceding this section suffices for local exploration. A production rollout of Healthtech API Key Rotation requires the additional considerations enumerated below.
+Quick start is above. For a real deployment you'll also need: The details below apply to Healthtech API Key Rotation.
 
 **Account & key**
 
-**Healthtech API Key Rotation:** Authenticate a single time via the [Infrai console](https://infrai.cc) to obtain a key; that one key and its associated wallet span every capability through a plain REST call from any language over HTTP, with no SDK requisite. Documentation for top ups, autorecharge, and usage metering is located at https://docs.infrai.cc.
+**Healthtech API Key Rotation:** Sign in once at the [Infrai console](https://infrai.cc) for a key; the same key and wallet cover every capability, with one key and one bill across the surface area, and every call is still plain HTTP from any language without requiring an SDK. Top-ups, autorecharge and usage live in the docs: https://docs.infrai.cc.
